@@ -1,0 +1,304 @@
+#!/bin/sh
+set -eu
+
+DATA_DIR=${HOME}/.config/vscode-cli
+PROGRAM=$(basename "$0")
+
+msg() { printf '%s: %s\n' "${PROGRAM}" "$*" >&2; }
+
+download_to_stdout() {
+	if command -v curl >/dev/null; then
+		curl -LkS -s "$@"
+	elif command -v wget >/dev/null; then
+		wget -O- --no-check-certificate -q "$@"
+	else
+		msg "Cannot find curl or wget"
+		exit 1
+	fi
+}
+
+prepare_vscode_cli() {
+	if [ ! -f "${CODE}" ]; then
+		mkdir -p "${DATA_DIR}"
+		case $(uname -m) in
+		aarch64 | arm64) VSCODE_ARCH=arm64 ;;
+		x86_64) VSCODE_ARCH=x64 ;;
+		*)
+			msg "Unsupported architecture"
+			exit 1
+			;;
+		esac
+
+		PLATFORM=cli-alpine-${VSCODE_ARCH}
+
+		URL=https://update.code.visualstudio.com/latest/${PLATFORM}/${QUALITY}
+
+		msg "Downloading VS Code Cli, quality=${QUALITY}"
+		download_to_stdout "${URL}" | gzip -d | tar -x -C "${DATA_DIR}"
+	fi
+}
+
+prepare_musl_rootfs() {
+	ROOTFS_DIR="${DATA_DIR}/rootfs"
+	mkdir -p "${ROOTFS_DIR}"
+	mkdir -p "${ROOTFS_DIR}/etc"
+
+	## Prepare musl-c rootfs
+	ALPINE_ARCH=$(uname -m)
+
+	if [ ! -f "${ROOTFS_DIR}/lib/ld-musl-${ALPINE_ARCH}.so.1" ]; then
+		msg "Downloading musl"
+		download_to_stdout "http://dl-cdn.alpinelinux.org/alpine/edge/main/${ALPINE_ARCH}/musl-1.2.5-r9.apk" | gzip -d | tar -x -C "${ROOTFS_DIR}" lib 2>/dev/null
+	fi
+
+	if [ ! -f "${ROOTFS_DIR}/usr/lib/libgcc_s.so.1" ]; then
+		msg "Downloading libgcc"
+		download_to_stdout "http://dl-cdn.alpinelinux.org/alpine/edge/main/${ALPINE_ARCH}/libgcc-14.2.0-r5.apk" | gzip -d | tar -x -C "${ROOTFS_DIR}" usr 2>/dev/null
+	fi
+
+	if [ ! -f "${ROOTFS_DIR}/usr/lib/libstdc++.so.6" ]; then
+		msg "Downloading libstdc++"
+		download_to_stdout "http://dl-cdn.alpinelinux.org/alpine/edge/main/${ALPINE_ARCH}/libstdc++-14.2.0-r5.apk" | gzip -d | tar -x -C "${ROOTFS_DIR}" usr 2>/dev/null
+	fi
+
+	if [ ! -d "${ROOTFS_DIR}/etc/ssl" ]; then
+		msg "Downloading ca-certificates-bundle"
+		download_to_stdout "http://dl-cdn.alpinelinux.org/alpine/edge/main/${ALPINE_ARCH}/ca-certificates-bundle-20241121-r1.apk" | gzip -d | tar -x -C "${ROOTFS_DIR}" etc/ssl 2>/dev/null
+	fi
+
+	if [ ! -f "${ROOTFS_DIR}/ect/resolv.conf" ]; then
+		cat <<EOF >"${ROOTFS_DIR}/etc/resolv.conf"
+nameserver 8.8.8.8
+nameserver 8.8.4.4
+EOF
+	fi
+
+	if [ ! -f "${ROOTFS_DIR}/etc/hosts" ]; then
+		cat <<EOF >"${ROOTFS_DIR}/etc/hosts"
+127.0.0.1 localhost
+::1 localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+EOF
+	fi
+
+	if [ ! -f "${ROOTFS_DIR}/etc/passwd" ]; then
+		cat <<EOF >"${ROOTFS_DIR}/etc/passwd"
+root:x:0:0:root:/root:/bin/sh
+bin:x:1:1:bin:/bin:/sbin/nologin
+daemon:x:2:2:daemon:/sbin:/sbin/nologin
+lp:x:4:7:lp:/var/spool/lpd:/sbin/nologin
+sync:x:5:0:sync:/sbin:/bin/sync
+shutdown:x:6:0:shutdown:/sbin:/sbin/shutdown
+halt:x:7:0:halt:/sbin:/sbin/halt
+mail:x:8:12:mail:/var/mail:/sbin/nologin
+news:x:9:13:news:/usr/lib/news:/sbin/nologin
+uucp:x:10:14:uucp:/var/spool/uucppublic:/sbin/nologin
+cron:x:16:16:cron:/var/spool/cron:/sbin/nologin
+ftp:x:21:21::/var/lib/ftp:/sbin/nologin
+sshd:x:22:22:sshd:/dev/null:/sbin/nologin
+games:x:35:35:games:/usr/games:/sbin/nologin
+ntp:x:123:123:NTP:/var/empty:/sbin/nologin
+guest:x:405:100:guest:/dev/null:/sbin/nologin
+nobody:x:65534:65534:nobody:/:/sbin/nologin
+user:x:1000:1000:Linux User,,,:/home/user:/bin/bash
+EOF
+	fi
+}
+
+proot_musl_exec() {
+	prepare_musl_rootfs
+	unset LD_PRELOAD
+	export PROOT_TMP_DIR="${TMPDIR}"
+	exec proot \
+		--change-id=1000:1000 \
+		--kill-on-exit \
+		--bind="${ROOTFS_DIR}/etc/resolv.conf:/etc/resolv.conf" \
+		--bind="${ROOTFS_DIR}/etc/hosts:/etc/hosts" \
+		--bind="${ROOTFS_DIR}/etc/passwd:/etc/passwd" \
+		--bind="${ROOTFS_DIR}/etc/ssl:/etc/ssl" \
+		--bind="${ROOTFS_DIR}/lib:/lib" \
+		--bind="${ROOTFS_DIR}/usr:/usr" \
+		--bind=/system/bin/env:/usr/bin/env \
+		--bind=/system/bin/sh:/bin/sh \
+		"$@"
+}
+
+exec_code() {
+	if [ -x /system/bin/linker ] && [ ! -f "/lib/ld-musl-$(uname -m).so.1" ]; then
+		proot_musl_exec "${CODE}" "$@"
+	else
+		exec "${CODE}" "$@"
+	fi
+}
+
+get_installation_info() {
+	installation_path=$(exec_code version show | tail -n+2 | sed 's/.*Installation path: \(.*\)/\1/g')
+	installation_root=$(dirname "$(dirname "$(dirname "${installation_path}")")")
+	workbench_dir="${installation_root}/out/vs/code/browser/workbench"
+	revert_patch="${workbench_dir}/revert.patch"
+	msg "workbench_dir: ${workbench_dir}"
+}
+
+patch_for_android() {
+	get_installation_info
+	if [ -f "${revert_patch}" ]; then
+		msg "vscode installed in ${installation_root} has been patched already."
+	else
+		msg "Patching vscode installed in ${installation_root}"
+
+		js="${workbench_dir}/workbench.js"
+		html="${workbench_dir}/workbench.html"
+		js_origin=${js}.origin
+		html_origin=${html}.origin
+
+		msg "Backup origin files"
+		if [ ! -f "${js_origin}" ]; then
+			cp "${js}" "${js_origin}"
+		fi
+		if [ ! -f "${html_origin}" ]; then
+			cp "${html}" "${html_origin}"
+		fi
+
+		restore_files() {
+			msg "Restoring..."
+			cp "${js_origin}" "${js}"
+			cp "${html_origin}" "${html}"
+		}
+
+		on_error() {
+			printf "Exiting due to failure.\n" >&2
+			restore_files
+			exit 1
+		}
+
+		on_interrupt() {
+			trap - EXIT
+			printf "\rExit as requested.\n" >&2
+			restore_files
+			exit 1
+		}
+
+		trap on_error EXIT
+		trap on_interrupt HUP INT TERM
+
+		msg "Patching: fix keyboard popping up when scrolling"
+		## (zs.Contextmenu,l.initialTarget)
+		EventType=$(grep -Eo '\([^ ]\.type===[^ ]+\.Change\|\|[^ ]\.type===[^ ]+\.Contextmenu\)' "${js}" | grep -Eo '[^ =]+\.Contextmenu' | cut -d'.' -f1)
+		test -n "${EventType}"
+		# echo EventType="${EventType}"
+		var=eventType
+
+		# this.F(e,m,s,Math.abs(g)/f,g>0?1:-1,h,Math.abs(p)/f,p>0?1:-1,u)}
+		sed -E -i "s#(;this.[^ ]\\(.,.,.,Math.abs\\(g\\)/f,g>0\\?1:-1,.,Math.abs\\(.\\)/f,p>0\\?1:-1,.\\))#\1,this.${var}=${EventType}.Change#g" "${js}"
+		sed -E -i "s#(\\[a\\.identifier\\]\\}this.h&&\\()([^ ].preventDefault\\(\\),)#\\1this.${var}!==${EventType}.Change\\&\\&\\2this.${var}=void 0,#g" "${js}"
+		## ;this.F(e,m,s,Math.abs(g)/f,g>0?1:-1,u,Math.abs(p)/f,p>0?1:-1,d),this.xxx=zs.Change}this.D(this.C(zs.End,l.initialTarget)),delete this.r[a.identifier]}this.h&&(this.xxx!==zs.Change&&t.preventDefault(),this.xxx=void 0,t.stopPropagation(),this.h=!1)}
+		grep -E -o -q ';this.[^ ]\(e,m,s,Math\.abs\(g\)/f,g>0\?1:-1,.,Math\.abs\(p\)/f,p>0\?1:-1,[^ ]\),this\.eventType=[^ ]+\.Change\}this\.[^ ]\(this\.[^ ]+\([^ ]+\.End,l\.initialTarget\)\),delete this\.[^ ]\[[^ ]\.identifier\]\}this\.[^ ]&&\(this\.eventType!==[^ ]+\.Change&&t\.preventDefault\(\),this\.eventType=void 0,[^ ]\.stopPropagation\(\),this\.[^ ]=!1\)\}' "${js}"
+
+		viewportInteractiveWidget=resizes-content
+		msg "Patching: add html viewport content interactive-widget=${viewportInteractiveWidget}"
+		sed -E -i "s/(<meta name=\"viewport\" )(content=.+)(>$)/\1content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, interactive-widget=resizes-content\"\3/" "${html}"
+		## <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+		grep -E -o -q "<meta name=\"viewport\" content=\".+, interactive-widget=${viewportInteractiveWidget}\">$" "${html}"
+
+		commandPanelWidth=.80
+		msg "Patching: change command panel width to ${commandPanelWidth}"
+		sed -E -i "s^(Math.min\\(this\\.[^ ]\\.width\*)(\\.[0-9]+)^\\1${commandPanelWidth}^" "${js}"
+		grep -E -o -q '(Math\.min\(this\.[^ ]\.width\*)(\.[0-9]+)' "${js}"
+
+		msg "Patching: fix context menu for android"
+		## ,Pdt=!!(hw&&hw.indexOf("Android")>=0)
+		isAndroid=$(grep -Eo ',[^ ]{1,3}=!!\([^ ]{1,3}&&[^ ]{1,3}\.indexOf\("Android"\)>=0\),' "${js}" | cut -d= -f1 | sed s/,//)
+		test -n "${isAndroid}"
+		# echo isAndroid="${isAndroid}"
+
+		sed -E -i "s^(if\\(this\\.[^ ]\\.canRelayout===!1&&!\\([^ ]+&&[^ ]+\\.pointerEvents\\))(\\))^\1\&\&!${isAndroid}\2^" "${js}"
+		## (this.j.canRelayout===!1&&!(Il&&hg.pointerEvents)&&!$dt){this.hide()
+		grep -E -o -q '\(this\.[^ ]\.canRelayout===!1&&!\([^ ]+&&[^ ]+\.pointerEvents\)&&!.{1,3}\)\{this\.hide\(\)' "${js}"
+
+		sed -E -i "s^(\\{this\\.\\$&&\\!\\(..&&..\\.pointerEvents\\))(&&this\\.\\$\\.blur\\(\\)\\})^\1\&\&!${isAndroid}\2^" "${js}"
+		# ## {this.$&&!(Il&&hg.pointerEvents)&&!$dt&&this.$.blur()}
+		grep -E -o -q '\(\)=>\{this\..{1,3}!\([^ ]+&&[^ ]+\.pointerEvents\)&&!.{1,3}&&this\..\.blur\(\)' "${js}"
+
+		sed -E -i "s^(showContextView\\([^ ],[^ ],[^ ]\\)\\{let [^ ];)(.+)(,this.b.show\\([^ ]\\))^\\1${isAndroid}?this.b.setContainer(this.c.activeContainer,1):(\\2)\\3^" "${js}"
+		## showContextView(e,t,s){let n;$dt?this.b.setContainer(this.c.activeContainer,1):(t?t===this.c.getContainer(Ie(t))?n=1:s?n=3:n=2:n=1,this.b.setContainer(t??this.c.activeContainer,n)),this.b.show(e);
+		grep -E -o -q 'showContextView\([^ ],[^ ],[^ ]\)\{let [^ ];.{1,3}\?this\.[^ ].setContainer\(this\.[^ ].activeContainer,1\):\(' "${js}"
+
+		msg "Patching: change default configuration keyboard.dispatch to 'keyCode' for android"
+		sed -E -i "s^(,properties:\\{\"keyboard\\.dispatch\":\\{scope:1,type:\"string\",enum:\\[\"code\",\"keyCode\"\\],default:)(\"code\")^\\1${isAndroid}?\"keyCode\":\"code\"^" "${js}"
+		## ,properties:{"keyboard.dispatch":{scope:1,type:"string",enum:["code","keyCode"],default:$dt?"keyCode":"code",
+		grep -E -o -q ',properties:\{"keyboard\.dispatch":\{scope:1,type:"string",enum:\["code","keyCode"\],default:.{1,3}\?"keyCode":"code",' "${js}"
+
+		msg "Patching: fix actionWidget for android"
+		sed -E -i 's^(,.\.add\(q\(c,)(..\.MOUSE_DOWN)(,\(\)=>.\.remove\(\)\)\))(;)^\1\2\3\1"touchstart"\3\1"touchmove"\3\4^g' "${js}"
+		# # ;c.classList.add("context-view-pointerBlock"),r.add(q(c,ie.POINTER_MOVE,()=>c.remove())),r.add(q(c,ie.MOUSE_DOWN,()=>c.remove())),r.add(q(c,"touchstart",()=>c.remove())),r.add(q(c,"touchmove",()=>c.remove()));
+		grep -E -o -q ',r\.add\([^ ]+\([^ ]+,[^ ]+\.MOUSE_DOWN,\(\)=>[^ ]+\.remove\(\)\)\),[^ ]+\.add\([^ ]+\([^ ]+,"touchstart",\(\)=>[^ ]+\.remove\(\)\)\),[^ ]+\.add\([^ ]+\([^ ]+,"touchmove",\(\)=>[^ ]+\.remove\(\)\)\);' "${js}"
+
+		sed -E -i "s^(,)(this\\.B\\(this\\.a\\.onDidLayoutChange\\(\\(\\)=>this\\.r\\.hide\\(\\)\\)\\)\\})^\1${isAndroid}||\2^g" "${js}"
+		# ,Pdt||this.B(this.a.onDidLayoutChange(()=>this.r.hide()))}
+		grep -E -o -q ',.{1,3}\|\|this\.B\(this\.a\.onDidLayoutChange\(\(\)=>this\.r\.hide\(\)\)\)\}' "${js}"
+
+		msg "Creating revert patch"
+		(
+			cd "${installation_root}/out/vs/code/browser/workbench"
+			diff -u "workbench.js.origin" "workbench.js" >"${revert_patch}" || true
+			diff -u "workbench.html.origin" workbench.html >>"${revert_patch}" || true
+		)
+
+		msg "Remove backup"
+		rm "${js_origin}" "${html_origin}"
+
+		## Reset trap for HUP/INT/TERM.
+		trap - EXIT
+		msg "All Done"
+	fi
+}
+
+revert_patch() {
+	get_installation_info
+	if [ -f "${revert_patch}" ]; then
+		(
+			cd "${installation_root}/out/vs/code/browser/workbench"
+			patch -up0 -R <"${revert_patch}"
+			rm "${revert_patch}"
+		)
+	else
+		msg "There is nothing to revert."
+	fi
+}
+
+main() {
+	case "${PROGRAM}" in
+	*-insiders) QUALITY=insider CODE=${DATA_DIR}/code-insiders ;;
+	*) QUALITY=stable CODE=${DATA_DIR}/code ;;
+	esac
+	prepare_vscode_cli
+
+	if [ $# -gt 0 ]; then
+		case "$1" in
+		help | -h | --help)
+			"${CODE}" "$@"
+
+			BLD='' UND='' RES='' && if [ -t 1 ]; then BLD='\033[1m' UND='\033[4m' RES='\033[0m'; fi
+
+			# shellcheck disable=SC2059
+			printf "\n${BLD}${UND}MODIFIED COMMANDS:${RES}\n\
+      ${BLD}patch${RES}                          Patch vscode to work better on Android\n\
+      ${BLD}revert${RES}                         Revert patch\n"
+			;;
+		patch)
+			patch_for_android "$@"
+			;;
+		revert)
+			revert_patch "$@"
+			;;
+		*)
+			exec_code "$@"
+			;;
+		esac
+	else
+		exec_code "$@"
+	fi
+}
+
+main "$@"
