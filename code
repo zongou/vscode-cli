@@ -223,7 +223,7 @@ ${BLD}${UND}Usage:${RST} ${BLD}${PROGRAM} patch${RST} [INSTALLATION_ROOT]\n"
 		sed -E -i "s/(<meta name=\"viewport\" )(content=.+)(>$)/\1content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, interactive-widget=${viewportInteractiveWidget}\"\3/" "${html}"
 		grep -E -o -q "<meta name=\"viewport\" content=\".+, interactive-widget=${viewportInteractiveWidget}\">$" "${html}"
 
-		commandPanelWidth=.80
+		commandPanelWidth=.76
 		msg "Patching: change command panel width to ${commandPanelWidth}"
 		## -	,t=Math.min(this.j.width*.62,Fje.f);
 		## +	,t=Math.min(this.j.width*.80,Fje.f);
@@ -277,9 +277,9 @@ ${BLD}${UND}Usage:${RST} ${BLD}${PROGRAM} patch${RST} [INSTALLATION_ROOT]\n"
 		sed -E -i 's^(;)(this.R.style.position="fixed",this.R.style.top="0",this.R.style.left="0")^\1this.R.style.zIndex="1000",\2^' "${js}"
 		grep -E -o -q ';this.R.style.zIndex="-?[0-9]+",this.R.style.position="fixed",this.R.style.top="0",this.R.style.left="0"' "${js}"
 
-		# keyboard does not show in insiders
-		# "editor.experimentalEditContextEnabled": false
-		# https://github.com/microsoft/vscode/commit/3ff1dceedf606ee5cc60ffab6c1132b91ce67228
+		## keyboard does not show in insiders
+		## "editor.experimentalEditContextEnabled": false
+		## https://github.com/microsoft/vscode/commit/3ff1dceedf606ee5cc60ffab6c1132b91ce67228
 
 		msg "Creating revert patch"
 		(
