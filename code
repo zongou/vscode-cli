@@ -225,7 +225,7 @@ get_installation_info() {
 	workbench_dir="${installation_root}/out/vs/code/browser/workbench"
 	if [ -d "${workbench_dir}" ]; then
 		revert_patch="${workbench_dir}/revert.patch"
-		msg "workbench_dir: ${workbench_dir}"
+		# msg "workbench_dir: ${workbench_dir}"
 	else
 		msg "Cannot find installation in ${installation_root}"
 		exit 1
@@ -248,15 +248,15 @@ ${BLD}${UND}Usage:${RST} ${BLD}${PROGRAM} patch${RST} [INSTALLATION_ROOT]\n"
 	fi
 	get_installation_info "$@"
 	if [ -f "${revert_patch}" ]; then
-		msg "vscode installed in ${installation_root} has been patched already."
+		msg "patch: already patched in ${installation_root}"
 	else
-		msg "Patching vscode installed in ${installation_root}"
+		msg "patch: start patching in ${installation_root}"
 
 		js="${workbench_dir}/workbench.js"
 		html="${workbench_dir}/workbench.html"
 		ext_origin=.origin
 
-		msg "Backup origin files"
+		msg "patch: backing up origin files"
 		for file in "${js}" "${html}"; do
 			if [ ! -f "${file}${ext_origin}" ]; then
 				cp "${file}" "${file}${ext_origin}"
@@ -286,94 +286,98 @@ ${BLD}${UND}Usage:${RST} ${BLD}${PROGRAM} patch${RST} [INSTALLATION_ROOT]\n"
 		trap on_error EXIT
 		trap on_interrupt HUP INT TERM
 
-		msg "Patching: fix keyboard popping up when scrolling"
+		# msg "patch: change command panel width to ${commandPanelWidth}"
+		# commandPanelWidth=.76
+		# ## -	,t=Math.min(this.j.width*.62,Fje.f);
+		# ## +	,t=Math.min(this.j.width*.80,Fje.f);
+		# sed -E -i "s^(Math.min\\(this\\.\w\\.width\*)(\\.[0-9]+)^\\1${commandPanelWidth}^" "${js}"
+		# grep -E -o -q '(Math\.min\(this\.\w\.width\*)(\.[0-9]+)' "${js}"
+
+		msg "patch: fix keyboard popping up when scrolling"
 		## (e.type===Ks.Change||e.type===Ks.Contextmenu)
-		## EventType=Ks
-		EventType=$(grep -Eo '\([^ ]\.type===[^ ]+\.Change\|\|[^ ]\.type===[^ ]+\.Contextmenu\)' "${js}" | grep -Eo '[^ =]+\.Contextmenu' | cut -d'.' -f1)
+		EventType=$(grep -Eo '\(e.type===\w+\.Change\|\|\w+\.type===\w+\.Contextmenu\)' "${js}" | grep -Eo '[^ =]+\.Contextmenu' | cut -d'.' -f1)
 		test -n "${EventType}"
-		# msg "EventType=${EventType}"
 
 		var=eventType
-		## -	;this.F(e,m,s,Math.abs(g)/f,g>0?1:-1,h,Math.abs(p)/f,p>0?1:-1,u)}this.D(this.C(Ks.End,l.initialTarget)),delete this.r[a.identifier]}this.h&&(t.preventDefault(),t.stopPropagation(),
-		## +	;this.F(e,m,s,Math.abs(g)/f,g>0?1:-1,h,Math.abs(p)/f,p>0?1:-1,u),this.eventType=Ks.Change}this.D(this.C(Ks.End,l.initialTarget)),delete this.r[a.identifier]}this.h&&(this.eventType!==Ks.Change&&t.preventDefault(),this.eventType=void 0,t.stopPropagation(),
-		sed -E -i "s#(;this.[^ ]\\(.,.,.,Math.abs\\(g\\)/f,g>0\\?1:-1,.,Math.abs\\(.\\)/f,p>0\\?1:-1,.\\))#\1,this.${var}=${EventType}.Change#g" "${js}"
-		sed -E -i "s#(\\[a\\.identifier\\]\\}this.h&&\\()([^ ].preventDefault\\(\\),)#\\1this.${var}!==${EventType}.Change\\&\\&\\2this.${var}=void 0,#g" "${js}"
-		grep -E -o -q ';this.[^ ]\(e,m,s,Math\.abs\(g\)/f,g>0\?1:-1,.,Math\.abs\(p\)/f,p>0\?1:-1,[^ ]\),this\.eventType=[^ ]+\.Change\}this\.[^ ]\(this\.[^ ]+\([^ ]+\.End,l\.initialTarget\)\),delete this\.[^ ]\[[^ ]\.identifier\]\}this\.[^ ]&&\(this\.eventType!==[^ ]+\.Change&&t\.preventDefault\(\),this\.eventType=void 0,[^ ]\.stopPropagation\(\),this\.[^ ]=!1\)\}' "${js}"
+		# 		;this.inertia(e,b,o,Math.abs(f)/g,f>0?1:-1,p,Math.abs(v)/g,v>0?1:-1,m)}this.dispatchEvent(this.newGestureEvent(On.End,c.initialTarget)),delete this.activeTouches[l.identifier]}this.dispatched&&(t.preventDefault(),t.stopPropagation(),this.dispatched=!1)}
+		# 		;this.inertia(e,b,o,Math.abs(f)/g,f>0?1:-1,p,Math.abs(v)/g,v>0?1:-1,m),this.eventType=On.Change}this.dispatchEvent(this.newGestureEvent(On.End,c.initialTarget)),delete this.activeTouches[l.identifier]}this.dispatched&&(this.eventType!==On.Change&&t.preventDefault(),this.eventType=void 0,t.stopPropagation(),this.dispatched=!1)}
+
+		sed -E -i "s#(;this\.\w+\\(\w,\w,\w,Math.abs\\(.\\)/\w,\w>0\\?1:-1,\w,Math.abs\\(.\\)/\w,\w>0\\?1:-1,\w\\))#\1,this.${var}=${EventType}.Change#g" "${js}"
+		sed -E -i "s#(\\[\w\\.\w+\\]\\}this.\w+&&\\()(\w.preventDefault\\(\\),)#\\1this.${var}!==${EventType}.Change\\&\\&\\2this.${var}=void 0,#g" "${js}"
+		grep -E -o -q ";this\.\w+\(\w,\w,\w,Math.abs\(.\)/\w,\w>0\?1:-1,\w,Math.abs\(.\)/\w,\w>0\?1:-1,\w\),this\.${var}=${EventType}\.Change}this\.\w+\(this\.\w+\(${EventType}\.End,\w\.\w+\)\),delete this\.\w+\[\w\.identifier\]}this\.\w+&&\(this\.eventType!==${EventType}\.Change&&t\.preventDefault\(\),this\.eventType=void 0,\w.stopPropagation\(\),this\.\w+=!1\)}" "${js}"
 
 		viewportInteractiveWidget=resizes-content
-		msg "Patching: add html viewport content interactive-widget=${viewportInteractiveWidget}"
+		msg "patch: add html viewport content interactive-widget=${viewportInteractiveWidget}"
 		## -	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no">
 		## +	<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
 		sed -E -i "s/(<meta name=\"viewport\" )(content=.+)(>$)/\1content=\"width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no, interactive-widget=${viewportInteractiveWidget}\"\3/" "${html}"
 		grep -E -o -q "<meta name=\"viewport\" content=\".+, interactive-widget=${viewportInteractiveWidget}\">$" "${html}"
 
-		commandPanelWidth=.76
-		msg "Patching: change command panel width to ${commandPanelWidth}"
-		## -	,t=Math.min(this.j.width*.62,Fje.f);
-		## +	,t=Math.min(this.j.width*.80,Fje.f);
-		sed -E -i "s^(Math.min\\(this\\.[^ ]\\.width\*)(\\.[0-9]+)^\\1${commandPanelWidth}^" "${js}"
-		grep -E -o -q '(Math\.min\(this\.[^ ]\.width\*)(\.[0-9]+)' "${js}"
+		msg "patch: fix context menu for android"
 
-		msg "Patching: fix context menu for android"
+		# ,nct=!!(LT&&LT.indexOf("Android")>=0);
 		## ,npt=!!(Tw&&Tw.indexOf("Android")>=0),
 		## isAndroid=npt
-		isAndroid=$(grep -Eo ',[^ ]{1,3}=!!\([^ ]{1,3}&&[^ ]{1,3}\.indexOf\("Android"\)>=0\),' "${js}" | cut -d= -f1 | sed s/,//)
+		isAndroid=$(grep -Eo ',\w{1,3}=!!\(\w{1,3}&&\w{1,3}\.indexOf\("Android"\)>=0\)' "${js}" | cut -d= -f1 | sed s/,//)
 		test -n "${isAndroid}"
-		# msg "isAndroid=${isAndroid}"
+
+		# {if(this.delegate.canRelayout===!1&&!(Rl&&Qh.pointerEvents)){this.hide();return}
 
 		## -	{if(this.j.canRelayout===!1&&!(Ol&&Lg.pointerEvents)){this.hide();return}
 		## +	{if(this.j.canRelayout===!1&&!(Ol&&Lg.pointerEvents)&&!npt){this.hide();return}
-		sed -E -i "s^(if\\(this\\.[^ ]\\.canRelayout===!1&&!\\([^ ]+&&[^ ]+\\.pointerEvents\\))(\\))^\1\&\&!${isAndroid}\2^" "${js}"
-		grep -E -o -q '\(this\.[^ ]\.canRelayout===!1&&!\([^ ]+&&[^ ]+\.pointerEvents\)&&!.{1,3}\)\{this\.hide\(\)' "${js}"
+		sed -E -i "s^(if\\(this\\.\w+\\.canRelayout===!1&&!\\(\w+&&\w+\\.pointerEvents\\))(\\))^\1\&\&!${isAndroid}\2^" "${js}"
+		grep -E -o -q '\(this\.\w+\.canRelayout===!1&&!\(\w+&&\w+\.pointerEvents\)&&!.{1,3}\)\{this\.hide\(\)' "${js}"
 
 		## Remain the menu opened by menu button
+		# ,()=>{this.menubar&&!(Rl&&Qh.pointerEvents)&&this.menubar.blur()})),
 		## -	,()=>{this.$&&!(Ol&&Lg.pointerEvents)&&this.$.blur()})),
-		## +	,()=>{this.$&&!(Ol&&Lg.pointerEvents)&&!npt&&this.$.blur()})),
-		sed -E -i "s^(\\{this\\.\\$&&\\!\\(..&&..\\.pointerEvents\\))(&&this\\.\\$\\.blur\\(\\)\\})^\1\&\&!${isAndroid}\2^" "${js}"
-		grep -E -o -q '\(\)=>\{this\..{1,3}!\([^ ]+&&[^ ]+\.pointerEvents\)&&!.{1,3}&&this\..\.blur\(\)' "${js}"
+		## +	,()=>{this.menubar&&!(Ol&&Lg.pointerEvents)&&!npt&&this.menubar.blur()})),
+		sed -E -i "s^(\\{this\\.menubar&&\\!\\(..&&..\\.pointerEvents\\))(&&this\\.menubar\\.blur\\(\\)\\})^\1\&\&!${isAndroid}\2^" "${js}"
+		grep -E -o -q '\(\)=>\{this\.menubar&&!\(\w+&&\w+\.pointerEvents\)&&!.{1,3}&&this\.menubar\.blur\(\)' "${js}"
 
 		## Remain context menu position after window resize, together with next step
 		## -	showContextView(e,t,s){let n;t?t===this.c.getContainer(De(t))?n=1:s?n=3:n=2:n=1,this.b.setContainer(t??this.c.activeContainer,n),this.b.show(e);
 		## +	showContextView(e,t,s){let n;npt?this.b.setContainer(this.c.activeContainer,1):(t?t===this.c.getContainer(De(t))?n=1:s?n=3:n=2:n=1,this.b.setContainer(t??this.c.activeContainer,n)),this.b.show(e);
-		sed -E -i "s/(showContextView\\([^ ],[^ ],[^ ]\\)\\{let [^ ];)(.+)(,this.b.show\\([^ ]\\))/\\1${isAndroid}?this.b.setContainer(this.c.activeContainer,1):(\\2)\\3/" "${js}"
-		grep -E -o -q 'showContextView\([^ ],[^ ],[^ ]\)\{let [^ ];.{1,3}\?this\.[^ ].setContainer\(this\.[^ ].activeContainer,1\):\(' "${js}"
+		# sed -E -i "s/(showContextView\\(\w,\w,\w\\)\\{let \w;)(.+)(,this.b.show\\(\w\\))/\\1${isAndroid}?this.b.setContainer(this.c.activeContainer,1):(\\2)\\3/" "${js}"
+		# grep -E -o -q 'showContextView\(\w,\w,\w\)\{let \w;.{1,3}\?this\.\w.setContainer\(this\.\w.activeContainer,1\):\(' "${js}"
 
-		msg "Patching: change default configuration keyboard.dispatch to 'keyCode' for android"
+		msg "patch: change default configuration keyboard.dispatch to 'keyCode' for android"
 		## -	,properties:{"keyboard.dispatch":{scope:1,type:"string",enum:["code","keyCode"],default:"code",
 		## +	,properties:{"keyboard.dispatch":{scope:1,type:"string",enum:["code","keyCode"],default:npt?"keyCode":"code",
 		sed -E -i "s^(,properties:\\{\"keyboard\\.dispatch\":\\{scope:1,type:\"string\",enum:\\[\"code\",\"keyCode\"\\],default:)(\"code\")^\\1${isAndroid}?\"keyCode\":\"code\"^" "${js}"
 		grep -E -o -q ',properties:\{"keyboard\.dispatch":\{scope:1,type:"string",enum:\["code","keyCode"\],default:.{1,3}\?"keyCode":"code",' "${js}"
 
-		msg "Patching: fix actionWidget for android"
-		## -	;c.classList.add("context-view-pointerBlock"),o.add(K(c,ne.POINTER_MOVE,()=>c.remove())),o.add(K(c,ne.MOUSE_DOWN,()=>c.remove()));
-		## +	;c.classList.add("context-view-pointerBlock"),o.add(K(c,ne.POINTER_MOVE,()=>c.remove())),o.add(K(c,ne.MOUSE_DOWN,()=>c.remove())),o.add(K(c,"touchstart",()=>c.remove())),o.add(K(c,"touchmove",()=>c.remove()));
-		sed -E -i 's^(,.\.add\(\w\(\w,)(..\.MOUSE_DOWN)(,\(\)=>.\.remove\(\)\)\))(;)^\1\2\3\1"touchstart"\3\1"touchmove"\3\4^g' "${js}"
-		grep -E -o -q ',\w\.add\([^ ]+\([^ ]+,[^ ]+\.MOUSE_DOWN,\(\)=>[^ ]+\.remove\(\)\)\),[^ ]+\.add\([^ ]+\([^ ]+,"touchstart",\(\)=>[^ ]+\.remove\(\)\)\),[^ ]+\.add\([^ ]+\([^ ]+,"touchmove",\(\)=>[^ ]+\.remove\(\)\)\);' "${js}"
+		# msg "patch: fix actionWidget for android"
+		# ## -	;c.classList.add("context-view-pointerBlock"),o.add(K(c,ne.POINTER_MOVE,()=>c.remove())),o.add(K(c,ne.MOUSE_DOWN,()=>c.remove()));
+		# ## +	;c.classList.add("context-view-pointerBlock"),o.add(K(c,ne.POINTER_MOVE,()=>c.remove())),o.add(K(c,ne.MOUSE_DOWN,()=>c.remove())),o.add(K(c,"touchstart",()=>c.remove())),o.add(K(c,"touchmove",()=>c.remove()));
+		# sed -E -i 's^(,.\.add\(\w\(\w,)(..\.MOUSE_DOWN)(,\(\)=>.\.remove\(\)\)\))(;)^\1\2\3\1"touchstart"\3\1"touchmove"\3\4^g' "${js}"
+		# grep -E -o -q ',\w\.add\(\w+\(\w+,\w+\.MOUSE_DOWN,\(\)=>\w+\.remove\(\)\)\),\w+\.add\(\w+\(\w+,"touchstart",\(\)=>\w+\.remove\(\)\)\),\w+\.add\(\w+\(\w+,"touchmove",\(\)=>\w+\.remove\(\)\)\);' "${js}"
 
-		## -	,this.B(this.a.onDidLayoutChange(()=>this.r.hide()))}
-		## +	,npt||this.B(this.a.onDidLayoutChange(()=>this.r.hide()))}
-		sed -E -i "s^(,)(this\\.\w\\(this\\.a\\.onDidLayoutChange\\(\\(\\)=>this\\.\w\\.hide\\(\\)\\)\\)\\})^\1${isAndroid}||\2^g" "${js}"
-		grep -E -o -q ',.{1,3}\|\|this\.\w\(this\.a\.onDidLayoutChange\(\(\)=>this\.\w\.hide\(\)\)\)\}' "${js}"
+		# ## -	,this.B(this.a.onDidLayoutChange(()=>this.r.hide()))}
+		# ## +	,npt||this.B(this.a.onDidLayoutChange(()=>this.r.hide()))}
+		# sed -E -i "s^(,)(this\\.\w\\(this\\.a\\.onDidLayoutChange\\(\\(\\)=>this\\.\w\\.hide\\(\\)\\)\\)\\})^\1${isAndroid}||\2^g" "${js}"
+		# grep -E -o -q ',.{1,3}\|\|this\.\w\(this\.a\.onDidLayoutChange\(\(\)=>this\.\w\.hide\(\)\)\)\}' "${js}"
 
 		## keyboard does not show in insiders
 		## "editor.experimentalEditContextEnabled": false
 		## https://github.com/microsoft/vscode/commit/3ff1dceedf606ee5cc60ffab6c1132b91ce67228
 
-		echo "${verify_patch}" | patch -u ${installation_root}/node_modules/@vscode/vsce-sign/src/main.js
+		msg "patch: fix vsce-sign of extension installing"
+		echo "${verify_patch}" | patch -su ${installation_root}/node_modules/@vscode/vsce-sign/src/main.js
 
-		msg "Creating revert patch"
+		msg "patch: creating revert patch"
 		(
 			cd "${workbench_dir}"
 			diff -u "workbench.js${ext_origin}" "workbench.js" >"${revert_patch}" || test -f "${revert_patch}"
 			diff -u "workbench.html${ext_origin}" workbench.html >>"${revert_patch}" || test -f "${revert_patch}"
 		)
 
-		msg "Remove backup"
+		msg "patch: removing backup"
 		rm "${js}${ext_origin}" "${html}${ext_origin}"
 
 		## Reset trap for HUP/INT/TERM.
 		trap - EXIT
-		msg "All Done"
+		msg "patch: done patching in ${installation_root}"
 	fi
 }
 
@@ -395,12 +399,13 @@ ${BLD}${UND}Usage:${RST} ${BLD}${PROGRAM} patch${RST} [INSTALLATION_ROOT]\n"
 	if [ -f "${revert_patch}" ]; then
 		(
 			cd "${installation_root}/out/vs/code/browser/workbench"
-			patch -up0 -R <"${revert_patch}"
-			echo "${verify_patch}" | patch -uR "${installation_root}/node_modules/@vscode/vsce-sign/src/main.js"
+			patch -sup0 -R <"${revert_patch}"
+			echo "${verify_patch}" | patch -suR "${installation_root}/node_modules/@vscode/vsce-sign/src/main.js"
 			rm "${revert_patch}"
+			msg "revert: done reverting in ${installation_root}"
 		)
 	else
-		msg "There is nothing to revert."
+		msg "revert: nothing to revert in ${installation_root}"
 	fi
 }
 
