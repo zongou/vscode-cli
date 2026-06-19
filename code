@@ -314,11 +314,9 @@ ${BLD}${UND}Usage:${RST} ${BLD}${PROGRAM} patch${RST} [INSTALLATION_ROOT]\n"
 		grep -E -o -q "<meta name=\"viewport\" content=\".+, interactive-widget=${viewportInteractiveWidget}\">$" "${html}"
 
 		msg "patch: fix context menu for android"
-
-		# ,nct=!!(LT&&LT.indexOf("Android")>=0);
-		## ,npt=!!(Tw&&Tw.indexOf("Android")>=0),
-		## isAndroid=npt
-		isAndroid=$(grep -Eo ',\w{1,3}=!!\(\w{1,3}&&\w{1,3}\.indexOf\("Android"\)>=0\)' "${js}" | cut -d= -f1 | sed s/,//)
+		## ,Fgt=!!($_&&$_.indexOf("Android")>=0);
+		## isAndroid=Fgt
+		isAndroid=$(grep -Eo ',\w+=!!\(.+&&.+\.indexOf\("Android"\)>=0\);' "${js}" | cut -d= -f1 | sed s/,//)
 		test -n "${isAndroid}"
 
 		# {if(this.delegate.canRelayout===!1&&!(Rl&&Qh.pointerEvents)){this.hide();return}
