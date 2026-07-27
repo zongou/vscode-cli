@@ -5,6 +5,7 @@ DATA_DIR=${HOME}/.config/vscli
 PROGRAM=$(basename "$0")
 
 msg() { printf '%s: %s\n' "${PROGRAM}" "$*" >&2; }
+log() { printf '%s\n' "$*" >>"${TMPDIR-/tmp}/a.log"; }
 
 download_to_stdout() {
 	if command -v curl >/dev/null; then
@@ -316,8 +317,10 @@ ${BLD}${UND}Usage:${RST} ${BLD}${PROGRAM} patch${RST} [INSTALLATION_ROOT]\n"
 		msg "patch: fix context menu for android"
 		## ,Fgt=!!($_&&$_.indexOf("Android")>=0);
 		## isAndroid=npt
-		isAndroid=$(grep -Eo ',\w+=!!\(.+&&.+\.indexOf\("Android"\)>=0\);' "${js}" | cut -d= -f1 | sed s/,//)
+		isAndroid=$(grep -Eo ',\w+=!!\(\w+&&\w+\.indexOf\(\"Android\"\)>=0\)[,;]' "${js}" | cut -d= -f1 | sed s/,//)
+		log "isAndroid=${isAndroid}"
 		test -n "${isAndroid}"
+
 
 		# {if(this.delegate.canRelayout===!1&&!(Rl&&Qh.pointerEvents)){this.hide();return}
 
