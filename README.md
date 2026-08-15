@@ -11,7 +11,7 @@ Run a web version of vscode
 运行 vscode 网页版
 
 ```sh
-./vscd serve-web \
+./vscli serve-web \
   --host=0.0.0.0 \
   --port=8000 \
   --without-connection-token \
@@ -26,7 +26,7 @@ To work better on Android
 为了更好的在 Android 上使用而打补丁
 
 ```sh
-./vscd patch
+./vscli patch
 ```
 
 ## Revert
@@ -36,5 +36,5 @@ Revert patch
 回退补丁
 
 ```sh
-./vscd revert
+./vscli revert
 ```
